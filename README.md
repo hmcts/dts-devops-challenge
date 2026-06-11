@@ -1,4 +1,4 @@
-# DTS Senior DevOps Technical Test
+# DTS DevOps Technical Test
 
 ## Objective
 
@@ -74,7 +74,7 @@ Design a pipeline that a team would use day-to-day. At minimum it should:
 - **Security scanning** — scan the container image for known vulnerabilities using Trivy; block the pipeline on CRITICAL severity findings (HIGH is a warning)
 - **Deploy** — validate and/or apply Kubernetes manifests to a cluster
 
-Think about how the pipeline should behave differently on feature branches versus `master`, and what gates (tests passing, no critical CVEs) should block a deployment.
+Think about how the pipeline should behave differently on feature branches versus `main`, and what gates (tests passing, no critical CVEs) should block a deployment.
 
 **CI deploy options — pick one:**
 
