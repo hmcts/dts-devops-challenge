@@ -2,149 +2,118 @@
 
 ## Objective
 
-To assess your ability to implement a small feature against a real database, then design and build a production-grade CI/CD pipeline around it.
+To assess your ability to containerise a working application, build a production-grade CI/CD pipeline around it, and define its cloud infrastructure with Terraform.
 
-**Estimated time: 2-3 hours.**
+**Estimated time: ~3 hours.**
 
 ---
 
 ## Scenario
 
-HMCTS requires a new system so caseworkers can keep track of their tasks. You will extend a provided Java backend to persist tasks to a database, then build the delivery pipeline and operational infrastructure needed to ship and run it reliably.
+HMCTS requires a new system so caseworkers can keep track of their cases. You are given a working Spring Boot service that is pre-wired for PostgreSQL. Your job is to connect it to its database and build the delivery pipeline and infrastructure definition needed to ship and run it reliably.
 
 ---
 
-## Part 1 — Backend Feature
+## Getting Started
 
 Fork the following repository and use it as your starting point:
 
 **[https://github.com/hmcts/hmcts-dev-test-backend](https://github.com/hmcts/hmcts-dev-test-backend)**
 
-The repository contains a working Spring Boot service. You need to extend it to persist tasks to a **PostgreSQL** database.
-
-**To verify the application builds before you start:**
+The repository contains a working Spring Boot service. **You do not need to write any Java** — this test is about configuration, pipelines, and infrastructure, not application code. To verify it builds and runs:
 
 ```bash
+./gradlew build
 ./gradlew bootRun
 
-curl http://localhost:4000/                 # welcome message
-curl http://localhost:4000/get-example-case # sample case JSON
+curl http://localhost:4000/                  # welcome message
+curl http://localhost:4000/get-example-case  # sample case JSON
 ```
-
-### What to implement
-
-Add Spring Data JPA and a PostgreSQL driver to the Gradle build, then implement two endpoints:
-
-| Method | Path         | Description           |
-|--------|--------------|-----------------------|
-| POST   | `/tasks`     | Create and persist a new task |
-| GET    | `/tasks/{id}`| Retrieve a task by ID |
-
-The `Task` entity should have the following fields:
-
-| Field       | Type     | Notes                             |
-|-------------|----------|-----------------------------------|
-| id          | Long     | Auto-generated primary key        |
-| title       | String   | Required                          |
-| description | String   | Optional                          |
-| status      | Enum     | `TODO`, `IN_PROGRESS`, `DONE`     |
-| dueDate     | DateTime | ISO-8601                          |
 
 ---
 
-## Part 2 — CI/CD Pipeline & DevOps
+## Part 1 — Database Wiring & Containerisation
 
-With a working API in place, build the delivery pipeline and operational configuration around it. Everything in this part must be runnable locally — no cloud account or paid services are required.
+The service is stateless as shipped, but it is pre-wired for **PostgreSQL**: `application.yaml` contains a commented-out, environment-variable-driven datasource section, and the comments explain how to enable a database-backed health check. Configuration changes only — no new endpoints or Java code are required.
 
-### 1. Containerisation
+**Database wiring:**
+
+- Uncomment the `datasource` section in `application.yaml` and add the PostgreSQL driver and `spring-boot-starter-jdbc` (or `spring-boot-starter-data-jpa`) dependencies to `build.gradle`
+- Expose the `health` actuator endpoint (the exposure list currently only includes `info`) and enable the `db` readiness group, so `curl http://localhost:4000/health` proves database connectivity
+
+**Containerisation:**
 
 - Write a `Dockerfile` for the backend service
 - Use a multi-stage build to keep the final image lean
 - The container should run as a non-root user
-- Include a `docker-compose.yml` that runs the application and its **PostgreSQL** database locally, passing database credentials to the app via environment variables
+- Include a `docker-compose.yml` that runs the application and its PostgreSQL database locally, passing database credentials to the app via environment variables — do not hardcode credentials anywhere
 
-### 2. CI/CD Pipeline (GitHub Actions)
+**You do not need to install PostgreSQL** — the docker-compose stack is the expected way to provide it, using the official `postgres` image. Note that once the datasource is enabled, the app needs a reachable database to start; if you want to test before your compose file is ready, a one-off container will do:
 
-Design a pipeline that a team would use day-to-day. At minimum it should:
+```bash
+docker run -d -e POSTGRES_PASSWORD=localdev -e POSTGRES_DB=devtest -p 5432:5432 postgres:16
+```
+
+**Bonus:** add container healthchecks to the compose file, wired to the `/health` endpoint.
+
+---
+
+## Part 2 — CI/CD Pipeline
+
+Design a GitHub Actions pipeline that a team would use day-to-day. At minimum it should:
 
 - **Build & test** — compile the application and run the test suite on every push
-- **Static analysis** — the `uk.gov.hmcts.java` plugin already wires Checkstyle and OWASP dependency checking into the Gradle build; ensure these run in CI
+- **Static analysis** — the `uk.gov.hmcts.java` plugin already wires Checkstyle into the Gradle build; ensure it runs in CI
 - **Container image build** — build the Docker image with a meaningful tagging strategy (e.g. git SHA, semver, or `branch-buildnumber` — document your rationale)
-- **Container image push** — optional but recommended; push to Docker Hub or GitHub Container Registry
-- **Security scanning** — scan the container image for known vulnerabilities using Trivy; block the pipeline on CRITICAL severity findings (HIGH is a warning)
-- **Deploy** — validate and/or apply Kubernetes manifests to a cluster
+- **Image security scanning** — scan the container image for known vulnerabilities using a scanner such as Trivy; block the pipeline on CRITICAL severity findings (HIGH is a warning)
+- **Terraform checks** — run `terraform fmt -check` and `terraform validate` against your infrastructure code (see Part 3)
 
-Think about how the pipeline should behave differently on feature branches versus `main`, and what gates (tests passing, no critical CVEs) should block a deployment.
+Think about how the pipeline should behave differently on feature branches versus `main`, and what gates (tests passing, no critical CVEs, valid Terraform) should block a merge or release.
 
-**CI deploy options — pick one:**
+---
 
-| Option | Approach |
-|--------|----------|
-| A (preferred) | Spin up a `kind` cluster inside the GitHub Actions runner and deploy there |
-| B | Run all checks in GitHub Actions; deploy to a local cluster manually and document the exact commands |
+## Part 3 — Infrastructure as Code: Terraform on Azure
 
-Either is valid. Option A shows end-to-end automation; Option B is fine if you document the manual steps clearly.
+Write a Terraform configuration that defines the production infrastructure for this service on **Azure**. This is a **design and validate** exercise — **you will not apply it and you do not need an Azure account.**
 
-### 3. Kubernetes Manifests
+### What to define
 
-Provide Kubernetes manifests to deploy the full stack to a local cluster (kind or minikube). These should include:
+- A resource group for the service
+- **Azure Database for PostgreSQL Flexible Server**, plus a database for the application
+- A compute service to run the container image — **Azure Container Apps** or **App Service for Containers**, your choice (briefly justify it)
+- **Azure Key Vault** holding the database credentials, with the application configured to consume them — the password must never appear in plain text in the repository
+- Application configuration (database host, name, port) passed to the container as environment variables
 
-**Application:**
-- `Deployment` with appropriate resource requests and limits
-- `Service` and `Ingress` configuration
-- Liveness and readiness probes (the `/actuator/health` endpoint is suitable for both)
+### What we're looking for
 
-**Database:**
-- `Deployment` and `Service` for PostgreSQL
-- `Secret` containing the database credentials, referenced by both the PostgreSQL and application deployments
-- `ConfigMap` for non-sensitive environment configuration (e.g. database name, host)
+- Sensible project structure: `variables.tf`, `outputs.tf`, type constraints and descriptions on variables, consistent naming and tagging
+- No secrets committed to the repository — sensitive values should be variables marked `sensitive`, sourced from Key Vault or pipeline secrets
+- A short note in your README on how state would be managed in a real deployment (e.g. `azurerm` backend with a storage account); the backend block itself may be commented out so `terraform validate` runs locally without credentials
 
-This is where secrets management becomes real: the database password must flow from a Kubernetes `Secret` into the app as an environment variable — do not hardcode credentials anywhere.
+### Verification
 
-**Ingress note:** Getting Ingress working locally requires an ingress controller. For **minikube** run `minikube addons enable ingress`; for **kind** follow the [kind ingress guide](https://kind.sigs.k8s.io/docs/user/ingress/) with `extraPortMappings`. If you run into issues, a `NodePort` Service is an acceptable substitute — just note the trade-off.
+`terraform fmt -check` and `terraform validate` must pass locally and in your pipeline — neither requires an Azure account. Note that `terraform plan` against the `azurerm` provider **does** require authentication, so it is not expected.
 
-**Secrets note:** A Kubernetes `Secret` is the minimum expected. For a more complete solution, consider Sealed Secrets or SOPS so encrypted secrets can be safely committed alongside the manifests.
+---
 
-### 4. Observability
-
-The application already produces structured JSON logs and exposes `/actuator/health`. Demonstrate that these are accessible in your running deployment:
-
-- Structured logs visible via `kubectl logs`
-- Readiness/liveness probes wired to `/actuator/health`
-- **Bonus:** expose `/actuator/prometheus` and provide a basic Prometheus scrape config or Grafana dashboard
-
-### 5. Documentation
+## Part 4 — Documentation
 
 Update the `README.md` in your submission covering:
 
 - How to run the application locally with Docker Compose
 - How the CI/CD pipeline works and what each stage does
-- How to deploy the full stack (app + database) to Kubernetes
+- An overview of the Terraform configuration and how it would be deployed in a real environment
 - Any assumptions, trade-offs, or things you would do differently with more time
-
----
-
-## Technical Requirements
-
-| Area             | Requirement                                                    |
-|------------------|----------------------------------------------------------------|
-| Language         | Java 21 (Gradle build, as provided)                            |
-| CI/CD            | GitHub Actions                                                 |
-| Containerisation | Docker                                                         |
-| Orchestration    | Kubernetes — kind or minikube (local, no cloud account needed) |
-| Database         | PostgreSQL                                                     |
-| Registry         | Docker Hub (free tier) or GitHub Container Registry            |
-| Source control   | GitHub                                                         |
 
 ---
 
 ## Submission Guidelines
 
 1. Fork the starter repository and add all pipeline and infrastructure configuration to it
-2. Ensure the repository includes all GitHub Actions workflows, Dockerfile, docker-compose, and Kubernetes manifests
+2. Ensure the repository includes all GitHub Actions workflows, the Dockerfile, docker-compose file, and Terraform configuration
 3. Include a `README.md` that lets an assessor run and verify your solution locally
 4. Submit the repository link with your application when complete
-5. Be prepared to walk through your implementation and pipeline design at interview stage
+5. Be prepared to walk through your implementation, pipeline design, and infrastructure choices at interview stage
 
 ---
 
