@@ -113,7 +113,7 @@ Update the `README.md` in your submission covering:
 2. Ensure the repository includes all GitHub Actions workflows, the Dockerfile, docker-compose file, and Terraform configuration
 3. Include a `README.md` that lets an assessor run and verify your solution locally
 4. Submit the repository link with your application when complete
-5. Be prepared to walk through your implementation, pipeline design, and infrastructure choices at interview stage
+5. Be prepared to walk through your implementation, pipeline design, and infrastructure choices at interview stage. There may also be an extension exercise at this point.
 
 ---
 
